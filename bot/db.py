@@ -3,6 +3,7 @@
 import sqlite3
 from pathlib import Path
 
+from .money import local_today
 from .phases import DEFAULT_PHASES
 
 SCHEMA = """
@@ -46,7 +47,23 @@ CREATE TABLE IF NOT EXISTS photos (
     caption TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS money (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    object_id INTEGER NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('in', 'out')),
+    cents INTEGER NOT NULL,
+    note TEXT,
+    day TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS money_object ON money(object_id);
 """
+
+# Columns added after the first release; applied to existing databases on start.
+_OBJECT_COLUMNS = {
+    "started_on": "TEXT",
+    "finished_on": "TEXT",
+    "agreed_cents": "INTEGER",
+}
 
 # Join used to make sure a phase belongs to the requesting user.
 _PHASE_OWNED = """
@@ -62,6 +79,11 @@ class DB:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        existing = {r["name"] for r in self._q("PRAGMA table_info(objects)")}
+        for col, typ in _OBJECT_COLUMNS.items():
+            if col not in existing:
+                self.conn.execute(f"ALTER TABLE objects ADD COLUMN {col} {typ}")
+        self.conn.execute("UPDATE objects SET started_on = date(created_at) WHERE started_on IS NULL")
         self.conn.commit()
 
     def _q(self, sql: str, *args) -> list[sqlite3.Row]:
@@ -92,7 +114,8 @@ class DB:
     # --- objects ---
     def add_object(self, user_id: int, name: str, address: str | None = None) -> int:
         obj_id = self._do(
-            "INSERT INTO objects(user_id, name, address) VALUES(?, ?, ?)", user_id, name, address
+            "INSERT INTO objects(user_id, name, address, started_on) VALUES(?, ?, ?, ?)",
+            user_id, name, address, local_today().isoformat(),
         )
         for pos, (kind, phase_name) in enumerate(DEFAULT_PHASES):
             self.conn.execute(
@@ -203,6 +226,52 @@ class DB:
 
     def list_photos(self, phase_id: int) -> list[sqlite3.Row]:
         return self._q("SELECT * FROM photos WHERE phase_id = ? ORDER BY id", phase_id)
+
+    # --- money ---
+    def set_object_field(self, user_id: int, obj_id: int, field: str, value) -> None:
+        assert field in _OBJECT_COLUMNS
+        self._do(f"UPDATE objects SET {field} = ? WHERE id = ? AND user_id = ?", value, obj_id, user_id)
+
+    def add_money(self, obj_id: int, kind: str, cents: int, note: str | None = None, day: str | None = None) -> int:
+        return self._do(
+            "INSERT INTO money(object_id, kind, cents, note, day) VALUES(?, ?, ?, ?, ?)",
+            obj_id, kind, cents, note or None, day or local_today().isoformat(),
+        )
+
+    def list_money(self, obj_id: int, limit: int = 20) -> list[sqlite3.Row]:
+        return self._q("SELECT * FROM money WHERE object_id = ? ORDER BY day DESC, id DESC LIMIT ?", obj_id, limit)
+
+    def get_money(self, user_id: int, money_id: int) -> sqlite3.Row | None:
+        return self._one(
+            "SELECT m.* FROM money m JOIN objects o ON o.id = m.object_id WHERE m.id = ? AND o.user_id = ?",
+            money_id, user_id,
+        )
+
+    def delete_money(self, money_id: int) -> None:
+        self._do("DELETE FROM money WHERE id = ?", money_id)
+
+    def money_totals(self, obj_id: int) -> tuple[int, int]:
+        row = self._one(
+            "SELECT COALESCE(SUM(CASE WHEN kind='in' THEN cents END), 0) AS i, "
+            "COALESCE(SUM(CASE WHEN kind='out' THEN cents END), 0) AS o FROM money WHERE object_id = ?",
+            obj_id,
+        )
+        return row["i"], row["o"]
+
+    def user_money_by_month(self, user_id: int) -> list[sqlite3.Row]:
+        return self._q(
+            """
+            SELECT substr(m.day, 1, 7) AS month,
+              COALESCE(SUM(CASE WHEN kind='in' THEN cents END), 0) AS i,
+              COALESCE(SUM(CASE WHEN kind='out' THEN cents END), 0) AS o
+            FROM money m JOIN objects o ON o.id = m.object_id
+            WHERE o.user_id = ? GROUP BY month ORDER BY month DESC
+            """,
+            user_id,
+        )
+
+    def user_first_start(self, user_id: int) -> str | None:
+        return self._one("SELECT MIN(started_on) AS d FROM objects WHERE user_id = ?", user_id)["d"]
 
     def count(self, table: str, phase_id: int) -> int:
         assert table in ("notes", "photos", "items")

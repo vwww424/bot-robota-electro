@@ -53,6 +53,11 @@ class Txt(CallbackData, prefix="t"):
     a: str  # items | note | drop
 
 
+class Fn(CallbackData, prefix="m"):
+    a: str  # obj | in | out | agreed | start | done | undone | hist | del | stats
+    id: int  # object id (money row id for "del", 0 for "stats")
+
+
 # ---------- states ----------
 class NewObject(StatesGroup):
     name = State()
@@ -102,6 +107,7 @@ async def menu_screen(target: Message | CallbackQuery, db: DB, user_id: int) -> 
         stage = o["current_phase_name"] or "✅ все готово"
         b.button(text=f"{o['name']} · {stage}", callback_data=Obj(a="open", id=o["id"]))
     b.button(text="➕ Новий об'єкт", callback_data=Nav(to="newobj"))
+    b.button(text="📊 Мої фінанси", callback_data=Fn(a="stats", id=0))
     b.adjust(1)
     text = "🏠 <b>Мої об'єкти</b>\n\n"
     text += "Обери об'єкт:" if objects else "Поки порожньо. Додай перший об'єкт 👇"
@@ -173,6 +179,7 @@ async def object_screen(target: Message | CallbackQuery, db: DB, user_id: int, o
     for p in phases:
         counter = f" ({p['items_done']}/{p['items_total']})" if p["items_total"] else ""
         b.button(text=f"{STATUS_ICON[p['status']]} {p['name']}{counter}", callback_data=Ph(a="open", id=p["id"]))
+    b.button(text="💰 Фінанси об'єкта", callback_data=Fn(a="obj", id=obj_id))
     b.button(text="➕ Своя фаза", callback_data=Obj(a="newphase", id=obj_id))
     b.button(text="🗑 Видалити об'єкт", callback_data=Obj(a="del", id=obj_id))
     b.button(text="⬅️ Об'єкти", callback_data=Nav(to="menu"))
