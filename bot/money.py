@@ -55,7 +55,7 @@ def parse_date(text: str) -> date | None:
         return None
 
 
-def days_between(start: str, end: str | None) -> int:
+def days_between(start: str, end: str | None = None) -> int:
     """Calendar days including both ends; end defaults to today."""
     d0 = date.fromisoformat(start)
     d1 = date.fromisoformat(end) if end else local_today()
