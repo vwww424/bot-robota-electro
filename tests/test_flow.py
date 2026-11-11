@@ -1,6 +1,6 @@
 """Сценарій: створити об'єкт → додати пункти → фото → завершити фазу з перевіркою."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from aiogram import Bot, Dispatcher
@@ -10,7 +10,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, Chat, Message, PhotoSize, Update, User
 
 from bot.db import DB
-from bot.handlers import Fin, Nav, Ph, Txt, router
+from bot.finance import router as finance_router
+from bot.handlers import Fin, Fn, Nav, Ph, Txt, router
+from bot.money import local_today
 from bot.phases import checklist_for
 
 USER = User(id=7, is_bot=False, first_name="Майстер")
@@ -39,6 +41,7 @@ class FakeSession(BaseSession):
 # A router can only be attached once, so all tests share one dispatcher.
 DP = Dispatcher(storage=MemoryStorage())
 DP.include_router(router)
+DP.include_router(finance_router)
 
 
 @pytest.fixture
@@ -122,3 +125,34 @@ async def test_other_user_cannot_open_phase(env):
     await dp.feed_update(bot, press(Ph(a="open", id=phase["id"])))
     assert "Чужий" not in last_text(session)
     assert "Мої об'єкти" in last_text(session)
+
+
+async def test_finance_flow(env):
+    db, dp, bot, session = env
+    obj = db.add_object(7, "Кв. 45")
+    db.set_object_field(7, obj, "started_on", (local_today() - timedelta(days=9)).isoformat())
+
+    await dp.feed_update(bot, press(Fn(a="obj", id=obj)))
+    assert "Днів на об'єкті: <b>10</b>" in last_text(session)
+
+    await dp.feed_update(bot, press(Fn(a="agreed", id=obj)))
+    await dp.feed_update(bot, msg(text="50 000"))
+    await dp.feed_update(bot, press(Fn(a="in", id=obj)))
+    await dp.feed_update(bot, msg(text="аванс"))  # no number -> asks again, stays in input
+    assert "Не зрозумів" in last_text(session)
+    await dp.feed_update(bot, msg(text="20000 аванс"))
+    await dp.feed_update(bot, press(Fn(a="out", id=obj)))
+    await dp.feed_update(bot, msg(text="1500 кабель"))
+
+    screen = last_text(session)
+    assert "Отримав: <b>20 000 грн</b>" in screen
+    assert "доплатити: <b>30 000 грн</b>" in screen
+    assert "Чистими: <b>18 500 грн</b>" in screen
+    assert "за день: <b>1 850 грн</b>" in screen
+
+    await dp.feed_update(bot, press(Fn(a="stats", id=0)))
+    assert "Середня в день: <b>1 850 грн</b>" in last_text(session)
+
+    out_row = next(r for r in db.list_money(obj) if r["kind"] == "out")
+    await dp.feed_update(bot, press(Fn(a="del", id=out_row["id"])))
+    assert db.money_totals(obj) == (2_000_000, 0)

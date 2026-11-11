@@ -11,6 +11,7 @@ from aiogram.types import BotCommand
 from dotenv import load_dotenv
 
 from .db import DB
+from .finance import router as finance_router
 from .handlers import router
 
 
@@ -28,6 +29,7 @@ async def main() -> None:
     bot = Bot(token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage(), db=db)
     dp.include_router(router)
+    dp.include_router(finance_router)
     await bot.set_my_commands([
         BotCommand(command="start", description="Мої об'єкти"),
         BotCommand(command="cancel", description="Скасувати введення"),
