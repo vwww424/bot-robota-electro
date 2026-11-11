@@ -1,1 +1,51 @@
-# bot-robota-electro-
+# ⚡ Бот для електромонтажника
+
+Телеграм-бот, щоб не забувати, що де треба зробити і що вже зроблено по об'єктах.
+
+## Як користуватись
+
+1. `/start` → **Мої об'єкти** → **➕ Новий об'єкт** (назва, адреса/телефон).
+2. В об'єкті є стандартні фази: 📏 Заміри, 🔌 Розкидання кабелю, 🕳 Підрозетники, 🔗 Розпайка коробок, ⚡ Зборка щита, 💡 Фурнітура. Можна додати свою (**➕ Своя фаза**).
+3. У фазі:
+   - **➕ Пункти** — кожен з нового рядка, з кількістю (`Розетки — 24 шт`). Тиснеш на пункт, і він відмічається ✅.
+   - **📝 Примітка** — текстом або голосовим.
+   - **Фото й голосові** можна просто кидати в чат, вони збережуться в останню відкриту фазу. Звичайний текст бот запропонує зберегти як примітку або як пункти.
+4. **🏁 Завершити фазу** — бот спершу покаже невідмічені пункти, потім поставить питання «нічого не проєбав?». Кожне «Ні» стає пунктом у списку, і фаза лишається відкритою.
+
+Кожен користувач бачить лише свої об'єкти. Фото зберігаються на серверах Telegram, у базі лише посилання на них.
+
+Питання перевірки для кожної фази лежать у `bot/phases.py`, міняти їх можна прямо там.
+
+## Запуск локально
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # впиши BOT_TOKEN від @BotFather
+python -m bot.main
+```
+
+Тести: `pip install -r requirements-dev.txt && pytest`
+
+## Безкоштовний сервер: Oracle Cloud Always Free
+
+1. Зареєструйся на <https://www.oracle.com/cloud/free/> (потрібна картка для перевірки, гроші не знімають, поки сидиш на Always Free).
+2. Створи VM: образ **Ubuntu**, форма **VM.Standard.E2.1.Micro** (Always Free) або Ampere A1. Збережи SSH-ключ.
+3. Зайди на сервер і встанови бота:
+
+```bash
+sudo apt update && sudo apt install -y git python3-venv
+git clone https://github.com/<твій-акаунт>/bot-robota-electro-.git ~/bot
+cd ~/bot
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env && nano .env      # встав BOT_TOKEN
+sudo cp deploy/electrobot.service /etc/systemd/system/
+sudo systemctl enable --now electrobot
+journalctl -u electrobot -f            # логи
+```
+
+Сервіс у `deploy/electrobot.service` розрахований на користувача `ubuntu` і папку `~/bot`. Якщо в тебе інакше, поправ шляхи у файлі.
+
+Оновлення: `cd ~/bot && git pull && sudo systemctl restart electrobot`.
+
+Бекап бази: файл `data/bot.db`, достатньо періодично його копіювати.
